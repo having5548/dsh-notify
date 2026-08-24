@@ -126,4 +126,4 @@ pnpm pack --pack-destination ..
 
 ## 📄 License
 
-[MIT](LICENSE) © dsh-notify contributors
+[MIT](LICENSE) © dsh-notify by having5548
