@@ -1,7 +1,7 @@
 <div align="center">
 
 # 🔔 dsh-notify
-##Only Windows supported
+#Only Windows supported
 
 **DeepSeek Harness 通用通知插件** — 新会话 / 待审批 / 任务完成 / 任务中断，一个都不错过。
 
