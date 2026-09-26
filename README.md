@@ -5,7 +5,7 @@
 
 **DeepSeek Harness 通用通知插件** — 新会话 / 待审批 / 任务完成 / 任务中断，一个都不错过。
 
-![Version](https://img.shields.io/badge/version-0.3.1-4c7ef3?style=flat-square)
+![Version](https://img.shields.io/badge/version-0.3.2-4c7ef3?style=flat-square)
 ![Platform](https://img.shields.io/badge/platform-Windows%2010%2B%20%7C%20macOS-0078d6?style=flat-square)
 ![License](https://img.shields.io/badge/license-MIT-green?style=flat-square)
 ![Runtime](https://img.shields.io/badge/runtime-DSH%20Web%20GUI-ff6b6b?style=flat-square)
@@ -33,7 +33,7 @@
 pnpm pack --pack-destination ..
 
 # 安装到 DSH web profile
-dsh plugin --profile web add dsh-notify-0.3.1.tgz
+dsh plugin --profile web add having5548-dsh-notify-0.3.2.tgz
 ```
 
 安装完成后**重启 DSH Web GUI** 生效（重启会中断当前会话，请先保存手头任务）。

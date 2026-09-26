@@ -2,4 +2,4 @@
 # 安装后由 DSH 启动时按 bundle 层栈叠加，把通知插件插入 Web profile。
 - insert:
     - id: dsh-notify
-      name: dsh-notify
+      name: '@having5548/dsh-notify'
