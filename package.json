@@ -11,6 +11,14 @@
     "windows",
     "macos"
   ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/having5548/dsh-notify.git"
+  },
+  "homepage": "https://github.com/having5548/dsh-notify#readme",
+  "bugs": {
+    "url": "https://github.com/having5548/dsh-notify/issues"
+  },
   "type": "module",
   "main": "lib/index.js",
   "exports": {
@@ -63,6 +71,9 @@
     }
   },
   "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
   "dependencies": {
     "schemastery": "^3.18.0"
   }
