@@ -5,10 +5,11 @@
 
 **DeepSeek Harness 通用通知插件** — 新会话 / 待审批 / 任务完成 / 任务中断，一个都不错过。
 
-![Version](https://img.shields.io/badge/version-0.3.2-4c7ef3?style=flat-square)
+![Version](https://img.shields.io/badge/version-0.4.0-4c7ef3?style=flat-square)
 ![Platform](https://img.shields.io/badge/platform-Windows%2010%2B%20%7C%20macOS-0078d6?style=flat-square)
 ![License](https://img.shields.io/badge/license-MIT-green?style=flat-square)
 ![Runtime](https://img.shields.io/badge/runtime-DSH%20Web%20GUI-ff6b6b?style=flat-square)
+![DSH](https://img.shields.io/badge/DSH-%E2%89%A50.1.7--rc.2-blueviolet?style=flat-square)
 ![Dependencies](https://img.shields.io/badge/dependencies-zero%20extra-9cf?style=flat-square)
 
 </div>
@@ -33,7 +34,7 @@
 pnpm pack --pack-destination ..
 
 # 安装到 DSH web profile
-dsh plugin --profile web add having5548-dsh-notify-0.3.2.tgz
+dsh plugin --profile web add having5548-dsh-notify-0.4.0.tgz
 ```
 
 安装完成后**重启 DSH Web GUI** 生效（重启会中断当前会话，请先保存手头任务）。
@@ -49,11 +50,11 @@ dsh plugin --profile web add having5548-dsh-notify-0.3.2.tgz
 | 场景 | 触发方式 | 通知内容 |
 | --- | --- | --- |
 | 新会话 | 会话列表出现非空会话 / 空白会话发出首条消息 | `DSH-<项目名>` · 新会话已创建 |
-| 待审批 | `ctx.uiSession.pendingInteractions` 出现 `kind: 'approval'` | 应用内通知含 批准 / 拒绝 按钮 |
-| 待回答 / 计划审阅 | 同上，`kind: 'question'` / `'plan-review'` | 「查看」按钮，点击回到会话 |
-| 任务完成 | `turn/end` reason=`completed` | 任务完成 |
-| 任务中断 / 失败 | `turn/end` reason=`aborted/error/interrupted` | 任务被中断 / 任务失败 |
-| 后台任务 | 会话列表 `jobsBySession` → `completed/killed/failed` | 后台任务完成 / 被中断 / 失败 |
+| 待审批 | `ctx.uiSession.sessionStatus` 里该会话的 `pendingInteraction.kind === 'approval'` | 应用内通知含 批准 / 拒绝 按钮 |
+| 待回答 / 计划审阅 | 同上，`kind` 为 `'question'` / `'plan-review'` | 「查看」按钮，点击回到会话 |
+| 任务完成 | 服务端 `turn/end` reason=`completed` | 任务完成 |
+| 任务中断 / 失败 | 服务端 `turn/end` reason=`aborted/error/interrupted` | 任务被中断 / 任务失败 |
+| 后台任务 | `ctx.jobs` 名册里该任务转为 `completed/killed/failed` | 后台任务完成 / 被中断 / 失败 |
 
 ## ⚙️ 设置面板
 
@@ -64,7 +65,7 @@ dsh plugin --profile web add having5548-dsh-notify-0.3.2.tgz
 - **场景开关**：新会话、待审批、待回答·计划审阅、任务完成、任务中断·失败、后台任务
 - **测试按钮**：测试应用内通知、测试系统通知、测试审批通知
 - **通知日志（已通知）**：内容 + 本地时区时间（如 `2026-08-23 22:45:01 GMT+8`），最多 100 条，可清空
-- 设置通过 DSH 官方设置系统持久化（`ctx.settings` / `ctx.settingsScope`），与 Web UI 其他设置一致
+- 设置通过 DSH 官方设置系统持久化：服务端以模块导出的 `Config` schema 声明，客户端经 `ctx.configForms.get('dsh-notify')` 读写，与 Web UI 其他设置一致
 
 ## 🖥️ 系统原生通知说明
 
@@ -85,8 +86,9 @@ dsh plugin --profile web add having5548-dsh-notify-0.3.2.tgz
 ```mermaid
 flowchart LR
     A[DSH 服务端<br/>session/event] -->|SSE /dsh-notify/events<br/>turn/end| B[Web/WebView2 客户端]
-    P[ctx.uiSession<br/>pendingInteractions] -->|待审批 / 待回答 / 计划审阅| B
-    L[ctx.sessions.list] -->|新会话 / 后台任务| B
+    P[ctx.uiSession.sessionStatus] -->|待审批 / 待回答 / 计划审阅| B
+    J[ctx.jobs] -->|后台任务| B
+    L[ctx.sessions.list] -->|新会话| B
     B -->|焦点在内| C[应用内 Toast + 提示音]
     B -->|焦点在外| D[POST /dsh-notify/native]
     D -->|Windows| E[dsh-toast.ps1 弹原生 Toast]
@@ -96,8 +98,10 @@ flowchart LR
 要点：
 
 - 服务端按运行平台自动选择通知通道：`win32` → PowerShell WinRT Toast；`darwin` → osascript；其他平台跳过
-- 服务端 SSE 只推 `turn/end`；**待审批 / 待回答 / 计划审阅由客户端直接从 `ctx.uiSession.pendingInteractions` 读取**——那是官方审批面板与侧边栏角标用的同一个事实源，服务端再广播一份只会造成一次审批弹两条通知
+- 服务端 SSE 只推 `turn/end`；**待审批 / 待回答 / 计划审阅由客户端直接从 `ctx.uiSession.sessionStatus` 读取**——那是官方审批面板与侧边栏角标用的同一个事实源，服务端再广播一份只会造成一次审批弹两条通知
+- 客户端只把 `sessions` / `slots` 放进 `inject`，其余服务（`configForms` / `uiSession` / `jobs` / `locale`）一律惰性解析：DSH 小版本升级常会改名或移除客户端服务，硬依赖会让整个插件停在 `pending`、连通知都发不出来。**宁可少一个功能，也不能整个插件不加载**
 - 应用内通知的「批准 / 拒绝」按钮直接调用 `PendingApproval.answer('allowed-once' | 'rejected')`，不需要先打开会话；待办在别处被应答或取消后，对应 Toast 会自动撤掉
+- 后台任务名册是**按会话订阅**的（`ctx.jobs.watchRows`），插件跟随会话列表增删订阅
 - 应用内通知的「查看」按钮仅作用于当前页面（纯 JS），不涉及任何系统激活
 - 多页面（浏览器 + 桌面壳）同时打开时按 `tag` 去重，避免重复通知
 
@@ -112,6 +116,7 @@ dsh-notify/
 ├─ assets/dsh-notify.ico    # 通知图标（合成，无版权）
 ├─ tools/generate-audio.mjs # 重新生成提示音
 ├─ tools/generate-icon.mjs  # 重新生成图标
+├─ tools/smoke-client.mjs   # 客户端接线回归测试（打桩跑，无需浏览器）
 ├─ cordis.patch.yml         # DSH bundle patch
 └─ package.json
 ```
@@ -119,6 +124,9 @@ dsh-notify/
 ## 🛠️ 开发
 
 ```bash
+# 客户端接线回归测试（DSH 升级后必跑）
+node tools/smoke-client.mjs
+
 # 重新生成提示音 / 图标
 node tools/generate-audio.mjs
 node tools/generate-icon.mjs
@@ -130,6 +138,11 @@ node --check lib/client.js
 # 打包
 pnpm pack --pack-destination ..
 ```
+
+> **DSH 升级后请务必跑一遍 `tools/smoke-client.mjs`。** DSH 小版本之间会改名或移除客户端服务
+> （0.1.5 → 0.1.7 就删掉了 `settingsScope`、把 `uiSession.pendingInteractions` 并进了
+> `sessionStatus`、把 `jobsBySession` 搬到了 `ctx.jobs`）。插件的 `inject` 里只要有一个服务
+> 不存在，cordis 就会让它在 `pending` 里一直等——**插件完全不加载，而且没有任何报错**。
 
 ## 📄 License
 

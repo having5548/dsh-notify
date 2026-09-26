@@ -1,6 +1,6 @@
 {
   "name": "@having5548/dsh-notify",
-  "version": "0.3.2",
+  "version": "0.4.0",
   "description": "DeepSeek Harness 通用通知插件：新会话 / 待审批 / 任务完成 / 任务中断时，在 GUI 内显示 Telegram 风格应用内通知并播放提示音；焦点在应用外时调用系统原生通知（Windows 10+ Toast / macOS 通知中心），仅通知、不回调。",
   "keywords": [
     "dsh",
