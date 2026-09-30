@@ -1,5 +1,5 @@
-// 临时冒烟测试：在无浏览器环境下打桩，验证 dsh-notify 客户端在 DSH 0.1.7
-// API 下的接线（sessionStatus / jobs / configForms / adapter.current / 优雅降级）。
+// 临时冒烟测试：在无浏览器环境下打桩，验证 dsh-notify 客户端的接线
+// （sessionStatus / jobs 订阅 / configForms / 子代理过滤 / 优雅降级）。
 // 运行：node tools/smoke-client.mjs
 // 用途：DSH 大版本升级后（客户端服务改名/移除）快速回归，防止插件静默停在 pending。
 import fs from 'node:fs'
@@ -51,7 +51,11 @@ globalThis.localStorage = {
   removeItem: (k) => ls.delete(k),
 }
 globalThis.Audio = class { play() { return Promise.resolve() } }
-globalThis.EventSource = class { close() {} }
+const eventSources = []
+globalThis.EventSource = class {
+  constructor(url) { this.url = url; eventSources.push(this) }
+  close() {}
+}
 globalThis.fetch = () => Promise.resolve({ ok: true })
 
 new Function('window', 'document', 'localStorage', 'Audio', 'EventSource', 'fetch', source)(
@@ -70,12 +74,14 @@ const SETTINGS = {
   enabled: true, inApp: true, sound: true, native: true, newSession: true,
   approval: true, question: true, taskComplete: true, taskInterrupted: true, jobs: true,
 }
+const NOW = Date.now()
+const HOUR = 3600 * 1000
 let listState = {
   phase: 'ready',
   ids: ['s1', 's2'],
   byId: {
-    s1: { id: 's1', displayTitle: 'proj', blank: false },
-    s2: { id: 's2', displayTitle: 'proj', blank: false },
+    s1: { id: 's1', displayTitle: 'proj', blank: false, running: true, updatedAt: NOW },
+    s2: { id: 's2', displayTitle: 'proj', blank: false, running: false, updatedAt: NOW },
   },
 }
 const listSubs = new Set()
@@ -91,15 +97,22 @@ const emitList = () => listSubs.forEach((fn) => fn())
 // uiSession：0.1.7 的 sessionStatus + adapter.current
 let statusMap = new Map()
 const statusSubs = new Set()
+const currentSubs = new Set()
 const current = { value: undefined }
 const uiSession = {
   sessionStatus: {
     getSnapshot: () => statusMap,
     subscribe: (fn) => { statusSubs.add(fn); return () => statusSubs.delete(fn) },
   },
-  adapter: { current: { getSnapshot: () => (current.value ? { key: current.value } : undefined) } },
+  adapter: {
+    current: {
+      getSnapshot: () => (current.value ? { key: current.value } : undefined),
+      subscribe: (fn) => { currentSubs.add(fn); return () => currentSubs.delete(fn) },
+    },
+  },
 }
 const emitStatus = () => statusSubs.forEach((fn) => fn())
+const setCurrent = (id) => { current.value = id; currentSubs.forEach((fn) => fn()) }
 
 // jobs：0.1.7 的 ctx.jobs（名册按会话订阅）
 let jobsRows = {}
@@ -164,16 +177,40 @@ assert.equal(snapshot().length, 0, '基线不补通知（全新会话）')
 // 2) 新会话 → 通知
 listState = Object.assign({}, listState, {
   ids: ['s1', 's2', 's3'],
-  byId: Object.assign({}, listState.byId, { s3: { id: 's3', displayTitle: 'proj', blank: false } }),
+  byId: Object.assign({}, listState.byId, { s3: { id: 's3', displayTitle: 'proj', blank: false, running: true, updatedAt: NOW } }),
 })
 emitList()
 assert.equal(snapshot().length, 1, '新会话应通知')
 assert.match(bodyOf(snapshot()[0]), /新会话已创建/)
 toastStore.remove(snapshot()[0].id)
 
-// 3) jobs 订阅：应为列表里每个会话建立 watchRows
-assert.equal(watched.get('s1'), 1, 's1 应被 watchRows')
-assert.equal(watched.get('s2'), 1, 's2 应被 watchRows')
+// 2b) 子代理会话 → 不通知（且不订阅它的任务名册）
+listState = Object.assign({}, listState, {
+  ids: ['s1', 's2', 's3', 'sub1'],
+  byId: Object.assign({}, listState.byId, {
+    sub1: { id: 'sub1', displayTitle: 'sub', blank: false, origin: 'subagent', running: true, updatedAt: NOW },
+  }),
+})
+emitList()
+assert.equal(snapshot().length, 0, '子代理会话不应产生「新会话」通知')
+
+// 2c) 陈旧会话 → 不订阅任务名册（控制订阅数量）
+listState = Object.assign({}, listState, {
+  ids: ['s1', 's2', 's3', 'sub1', 'old1'],
+  byId: Object.assign({}, listState.byId, {
+    old1: { id: 'old1', displayTitle: 'old', blank: false, running: false, updatedAt: NOW - 48 * HOUR },
+  }),
+})
+emitList()
+assert.equal(watched.get('old1'), undefined, '48h 未活动的会话不应被 watchRows')
+assert.equal(watched.get('s1'), 1, '运行中的会话应被 watchRows')
+assert.equal(watched.get('s2'), 1, '近期活跃的会话应被 watchRows')
+
+// 2d) 切换当前会话 → 立即补上它的订阅
+setCurrent('old1')
+assert.equal(watched.get('old1'), 1, '当前会话应被 watchRows（即使已陈旧）')
+setCurrent(undefined)
+snapshot().slice().forEach((t) => toastStore.remove(t.id)) // old1 作为新会话本就该通知，先清干净
 
 // 4) 后台任务结束 → 通知
 jobsRows = { s1: [{ id: 'job-1', label: 'build', status: 'running' }] }
@@ -184,6 +221,15 @@ const jobToast = snapshot().find((t) => /后台任务完成/.test(bodyOf(t)))
 assert(jobToast, '后台任务完成应通知')
 assert.match(bodyOf(jobToast), /build/)
 toastStore.remove(jobToast.id)
+
+// 4b) SSE turn/end：普通会话通知，子代理不通知
+const es = eventSources[0]
+assert(es, '应已建立 SSE 连接')
+es.onmessage({ data: JSON.stringify({ kind: 'turn-end', sessionId: 'sub1', title: 'proj', reason: 'completed' }) })
+assert.equal(snapshot().length, 0, '子代理的 turn/end 不应通知')
+es.onmessage({ data: JSON.stringify({ kind: 'turn-end', sessionId: 's1', title: 'proj', reason: 'completed' }) })
+assert(snapshot().some((t) => /任务完成/.test(bodyOf(t))), '普通会话的 turn/end 应通知')
+snapshot().slice().forEach((t) => toastStore.remove(t.id))
 
 // 5) 待审批（sessionStatus）→ 通知带 批准/拒绝
 const approval = {
@@ -228,4 +274,4 @@ mod.apply(makeCtx({
 assert(captured.store, '缺少可选服务时插件仍应加载')
 assert(captured.sectionOpts, '设置分区仍应注册')
 
-console.log('OK: 0.1.7 接线全部通过（sessionStatus / jobs / configForms / 优雅降级）')
+console.log('OK: 客户端接线全部通过（sessionStatus / jobs 订阅有界 / configForms / 子代理过滤 / 优雅降级）')

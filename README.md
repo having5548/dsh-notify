@@ -5,7 +5,7 @@
 
 **DeepSeek Harness 通用通知插件** — 新会话 / 待审批 / 任务完成 / 任务中断，一个都不错过。
 
-![Version](https://img.shields.io/badge/version-0.4.0-4c7ef3?style=flat-square)
+![Version](https://img.shields.io/badge/version-0.5.0-4c7ef3?style=flat-square)
 ![Platform](https://img.shields.io/badge/platform-Windows%2010%2B%20%7C%20macOS-0078d6?style=flat-square)
 ![License](https://img.shields.io/badge/license-MIT-green?style=flat-square)
 ![Runtime](https://img.shields.io/badge/runtime-DSH%20Web%20GUI-ff6b6b?style=flat-square)
@@ -22,6 +22,7 @@
 |---|---|---|
 | 🔔 **应用内通知**<br>焦点在 DSH 时，右上角弹出 Telegram 风格 Toast 并播放提示音 | 🪟 **Windows 原生通知**<br>焦点离开 DSH 时，由系统通知中心弹出（PowerShell + WinRT，无需管理员） | 🍎 **macOS 原生通知**<br>焦点离开 DSH 时，由 macOS 通知中心弹出（osascript，零依赖） |
 | 🎛️ **设置面板**<br>Web UI 设置 → 通知：总开关、通道开关、场景开关 | 📋 **通知日志**<br>记录内容 + 本地时区时间（如 `GMT+8`），最多 100 条 | 🚀 **重启不刷屏**<br>首次加载仅播种基线，历史状态不会重复补通知 |
+| 🤖 **子代理静音**<br>子代理会话不产生「新会话」「任务完成」通知，fan-out 工作流不会刷屏 | 📉 **任务订阅有界**<br>只订阅可能还有任务在跑的会话，不给全部历史会话开流 | ⚖️ **按需降级**<br>可选服务缺失时只关掉对应功能，插件本身永远能加载 |
 
 > 原生通知**只负责提醒**，不做点击回调 / 一键审批 / 带回前台（已移除 wscript + VBS 激活链路，避免被 360 等安全软件误报为木马）。待审批请回到 DSH 界面，在应用内通知或审批面板中处理。
 
@@ -33,8 +34,8 @@
 # 在项目目录下打包
 pnpm pack --pack-destination ..
 
-# 安装到 DSH web profile
-dsh plugin --profile web add having5548-dsh-notify-0.4.0.tgz
+# 安装到 DSH profile（新版桌面端是 desktop，旧版 Web 是 web）
+dsh plugin --profile desktop add having5548-dsh-notify-0.5.0.tgz
 ```
 
 安装完成后**重启 DSH Web GUI** 生效（重启会中断当前会话，请先保存手头任务）。
@@ -49,10 +50,10 @@ dsh plugin --profile web add having5548-dsh-notify-0.4.0.tgz
 
 | 场景 | 触发方式 | 通知内容 |
 | --- | --- | --- |
-| 新会话 | 会话列表出现非空会话 / 空白会话发出首条消息 | `DSH-<项目名>` · 新会话已创建 |
+| 新会话 | 会话列表出现非空会话 / 空白会话发出首条消息（**子代理会话除外**） | `DSH-<项目名>` · 新会话已创建 |
 | 待审批 | `ctx.uiSession.sessionStatus` 里该会话的 `pendingInteraction.kind === 'approval'` | 应用内通知含 批准 / 拒绝 按钮 |
 | 待回答 / 计划审阅 | 同上，`kind` 为 `'question'` / `'plan-review'` | 「查看」按钮，点击回到会话 |
-| 任务完成 | 服务端 `turn/end` reason=`completed` | 任务完成 |
+| 任务完成 | 服务端 `turn/end` reason=`completed`（**子代理会话除外**） | 任务完成 |
 | 任务中断 / 失败 | 服务端 `turn/end` reason=`aborted/error/interrupted` | 任务被中断 / 任务失败 |
 | 后台任务 | `ctx.jobs` 名册里该任务转为 `completed/killed/failed` | 后台任务完成 / 被中断 / 失败 |
 
@@ -101,7 +102,8 @@ flowchart LR
 - 服务端 SSE 只推 `turn/end`；**待审批 / 待回答 / 计划审阅由客户端直接从 `ctx.uiSession.sessionStatus` 读取**——那是官方审批面板与侧边栏角标用的同一个事实源，服务端再广播一份只会造成一次审批弹两条通知
 - 客户端只把 `sessions` / `slots` 放进 `inject`，其余服务（`configForms` / `uiSession` / `jobs` / `locale`）一律惰性解析：DSH 小版本升级常会改名或移除客户端服务，硬依赖会让整个插件停在 `pending`、连通知都发不出来。**宁可少一个功能，也不能整个插件不加载**
 - 应用内通知的「批准 / 拒绝」按钮直接调用 `PendingApproval.answer('allowed-once' | 'rejected')`，不需要先打开会话；待办在别处被应答或取消后，对应 Toast 会自动撤掉
-- 后台任务名册是**按会话订阅**的（`ctx.jobs.watchRows`），插件跟随会话列表增删订阅
+- **子代理会话被静音**：DSH 的子代理各自拥有独立会话（客户端 `SessionSummary.origin`、服务端 `session.header.origin` 均为 `'subagent'`），它们的每一轮都会 `turn/end`——一次 fan-out 工作流能刷出几十条通知。服务端在广播前就拦掉，「新会话」「任务完成」两侧也各自过滤。**审批 / 待回答不过滤**：漏掉一次授权的代价远大于多一条通知
+- 后台任务名册是**按会话订阅**的（`ctx.jobs.watchRows`），每个订阅在服务端是一条常开的 `job.list` 流。插件只订阅「可能还有任务在跑」的会话：当前会话、正在运行的会话、12 小时内活跃过的会话、以及名册里当前仍有任务的会话，其余不订阅
 - 应用内通知的「查看」按钮仅作用于当前页面（纯 JS），不涉及任何系统激活
 - 多页面（浏览器 + 桌面壳）同时打开时按 `tag` 去重，避免重复通知
 
