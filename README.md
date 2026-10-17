@@ -4,7 +4,7 @@
 
 **DeepSeek Harness 通用通知插件** — 新会话 / 待审批 / 任务完成 / 任务中断，一个都不错过。
 
-![Version](https://img.shields.io/badge/version-0.5.0-4c7ef3?style=flat-square)
+![Version](https://img.shields.io/badge/version-0.6.0-4c7ef3?style=flat-square)
 ![Platform](https://img.shields.io/badge/platform-Windows%2010%2B%20%7C%20macOS-0078d6?style=flat-square)
 ![License](https://img.shields.io/badge/license-MIT-green?style=flat-square)
 ![Runtime](https://img.shields.io/badge/runtime-DSH%20Web%20GUI-ff6b6b?style=flat-square)
@@ -19,7 +19,7 @@
 
 | | | |
 |---|---|---|
-| 🔔 **应用内通知**<br>焦点在 DSH 时，右上角弹出 Telegram 风格 Toast 并播放提示音 | 🪟 **Windows 原生通知**<br>焦点离开 DSH 时，由系统通知中心弹出（PowerShell + WinRT，无需管理员） | 🍎 **macOS 原生通知**<br>焦点离开 DSH 时，由 macOS 通知中心弹出（osascript，零依赖） |
+| 🔔 **应用内通知**<br>焦点在 DSH 时，右上角弹出 Telegram 风格 Toast 并播放提示音 | 🪟 **Windows 原生通知**<br>焦点离开 DSH 时，由系统通知中心弹出并发出提示音（PowerShell + WinRT，无需管理员） | 🍎 **macOS 原生通知**<br>焦点离开 DSH 时，由 macOS 通知中心弹出（osascript，零依赖） |
 | 🎛️ **设置面板**<br>Web UI 设置 → 通知：总开关、通道开关、场景开关 | 📋 **通知日志**<br>记录内容 + 本地时区时间（如 `GMT+8`），最多 100 条 | 🚀 **重启不刷屏**<br>首次加载仅播种基线，历史状态不会重复补通知 |
 | 🤖 **子代理静音**<br>子代理会话不产生「新会话」「任务完成」通知，fan-out 工作流不会刷屏 | 📉 **任务订阅有界**<br>只订阅可能还有任务在跑的会话，不给全部历史会话开流 | ⚖️ **按需降级**<br>可选服务缺失时只关掉对应功能，插件本身永远能加载 |
 
@@ -34,7 +34,7 @@
 pnpm pack --pack-destination ..
 
 # 安装到 DSH profile（新版桌面端是 desktop，旧版 Web 是 web）
-dsh plugin --profile desktop add having5548-dsh-notify-0.5.0.tgz
+dsh plugin --profile desktop add having5548-dsh-notify-0.6.0.tgz
 ```
 
 安装完成后**重启 DSH Web GUI** 生效（重启会中断当前会话，请先保存手头任务）。
@@ -42,7 +42,7 @@ dsh plugin --profile desktop add having5548-dsh-notify-0.5.0.tgz
 ### 使用
 
 - 打开 **设置 → 通知** 管理开关、测试通知、查看日志
-- 什么都不用配置即可开箱即用：焦点在内弹应用内通知 + 提示音，焦点在外弹系统原生通知
+- 什么都不用配置即可开箱即用：**前台后台都会响提示音**——焦点在内时弹应用内通知并在页面内发声，焦点在外时由系统原生通知发声（每条通知各响一次，不会重复）
 - 待审批时：焦点在内会弹应用内通知（含批准 / 拒绝按钮）；焦点在外会收到系统原生通知提醒，回到 DSH 处理
 
 ## 🧩 触发场景
@@ -61,7 +61,7 @@ dsh plugin --profile desktop add having5548-dsh-notify-0.5.0.tgz
 插件在 **DSH Web UI 设置 → 通知** 注册管理页：
 
 - **总开关**：启用通知（关闭后不再发出任何通知，客户端 + 服务端双重拦截）
-- **通道开关**：应用内通知 / 提示音 / 系统通知（失焦时）
+- **通道开关**：应用内通知 / 提示音 / 系统通知（失焦时）。提示音开关同时控制前台（页面内发声）和后台（系统通知发声）
 - **场景开关**：新会话、待审批、待回答·计划审阅、任务完成、任务中断·失败、后台任务
 - **测试按钮**：测试应用内通知、测试系统通知、测试审批通知
 - **通知日志（已通知）**：内容 + 本地时区时间（如 `2026-08-23 22:45:01 GMT+8`），最多 100 条，可清空
@@ -74,10 +74,12 @@ dsh plugin --profile desktop add having5548-dsh-notify-0.5.0.tgz
 - 纯 **PowerShell 5.1** + .NET Framework 内置 WinRT API（`Windows.UI.Notifications`）
 - **只写 HKCU 注册表**（AUMID），**不创建 .lnk**、**不注册自定义协议**、**不调用 wscript / VBS**，不会被 360 / 火绒等安全软件拦截，也无需管理员权限
 - 通知仅含标题 + 正文，点击不会跳转、不会审批、不会带回前台
+- **提示音**由 toast 里显式的 `<audio src="ms-winsoundevent:Notification.Default">` 负责，后台也能听到；关闭「提示音」时写 `<audio silent="true">`
 
 ### macOS
 
 - 通过系统自带的 `osascript` 调 `display notification`，走 macOS 通知中心，零第三方依赖
+- 提示音通过 `sound name "default"` 触发；关闭「提示音」时省略该子句（不写就是静音）
 - 通知标题 = `DSH-<项目名>`，正文 = 事件内容；点击通知不会跳转（如需图标 / 跳转可后续接入 `terminal-notifier`）
 - 首次使用时 macOS 可能提示是否允许「脚本编辑器 / osascript」发送通知，允许一次即可
 
@@ -89,15 +91,18 @@ flowchart LR
     P[ctx.uiSession.sessionStatus] -->|待审批 / 待回答 / 计划审阅| B
     J[ctx.jobs] -->|后台任务| B
     L[ctx.sessions.list] -->|新会话| B
-    B -->|焦点在内| C[应用内 Toast + 提示音]
+    B -->|焦点在内| C[应用内 Toast + 页面内提示音]
     B -->|焦点在外| D[POST /dsh-notify/native]
-    D -->|Windows| E[dsh-toast.ps1 弹原生 Toast]
-    D -->|macOS| F[osascript 弹原生通知]
+    D -->|Windows| E[dsh-toast.ps1 弹原生 Toast + 系统提示音]
+    D -->|macOS| F[osascript 弹原生通知 + 系统提示音]
 ```
 
 要点：
 
 - 服务端按运行平台自动选择通知通道：`win32` → PowerShell WinRT Toast；`darwin` → osascript；其他平台跳过
+- **提示音前台后台都响，但每条通知只响一次**：焦点在内时由页面内的 `<audio>` 发声；焦点在外时页面不再发声，改由系统通知发声（Windows 的 toast 里写显式 `<audio>`，macOS 用 `sound name "default"`）。之所以不两边都响，是为了避免同一条通知响两次
+  - 浏览器会限流后台标签页的播放，所以后台不适合依赖页面内发声——这正是把声音交给系统通知的原因
+  - 若「系统通知」通道被关掉，后台退回页面内发声（尽力而为，可能被浏览器限流）
 - 服务端 SSE 只推 `turn/end`；**待审批 / 待回答 / 计划审阅由客户端直接从 `ctx.uiSession.sessionStatus` 读取**——那是官方审批面板与侧边栏角标用的同一个事实源，服务端再广播一份只会造成一次审批弹两条通知
 - 客户端只把 `sessions` / `slots` 放进 `inject`，其余服务（`configForms` / `uiSession` / `jobs` / `locale`）一律惰性解析：DSH 小版本升级常会改名或移除客户端服务，硬依赖会让整个插件停在 `pending`、连通知都发不出来。**宁可少一个功能，也不能整个插件不加载**
 - 应用内通知的「批准 / 拒绝」按钮直接调用 `PendingApproval.answer('allowed-once' | 'rejected')`，不需要先打开会话；待办在别处被应答或取消后，对应 Toast 会自动撤掉

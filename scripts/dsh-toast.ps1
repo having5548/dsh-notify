@@ -9,6 +9,11 @@
 #        - Does NOT create any .lnk shortcut (avoids antivirus blocking/deletion)
 #   * Notification only (title + body): NO buttons, NO protocol activation,
 #     NO wscript/VBS, NO click-to-activate. This keeps antivirus software quiet.
+#   * Sound: the toast carries an explicit <audio> element so the notification
+#     chime plays while DSH is in the background too. payload.sound=false makes
+#     the toast silent. Keep every comment in this file ASCII-only: PowerShell
+#     5.1 reads a BOM-less UTF-8 file as ANSI (GBK here), where a Chinese comment
+#     can swallow the newline and corrupt the script.
 #
 # Usage:
 #   powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden \
@@ -57,7 +62,17 @@ function Show-NativeToast([string]$PayloadPath) {
   $tag = [string]$p.tag
   if ([string]::IsNullOrWhiteSpace($tag)) { $tag = 'dsh-notify' }
 
-  $xml = '<?xml version="1.0" encoding="utf-8"?><toast><visual><binding template="ToastGeneric"><text>' + $title + '</text><text>' + $body + '</text></binding></visual></toast>'
+  # Sound: explicit <audio> rather than relying on the platform default for a
+  # toast with no audio element. sound=false -> silent toast.
+  $sound = $true
+  if ($null -ne $p.PSObject.Properties['sound']) { $sound = [bool]$p.sound }
+  if ($sound) {
+    $audio = '<audio src="ms-winsoundevent:Notification.Default" loop="false"/>'
+  } else {
+    $audio = '<audio silent="true"/>'
+  }
+
+  $xml = '<?xml version="1.0" encoding="utf-8"?><toast><visual><binding template="ToastGeneric"><text>' + $title + '</text><text>' + $body + '</text></binding></visual>' + $audio + '</toast>'
 
   [Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom.XmlDocument, ContentType = WindowsRuntime] | Out-Null
   [Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null

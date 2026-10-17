@@ -29,19 +29,41 @@ const ReactDOM = {
 
 // ---------- 浏览器桩 ----------
 const ls = new Map()
+const focusState = { focused: true }
+// 记录监听器，测试里可以真正派发 focus / blur / visibilitychange
+const listeners = { window: {}, document: {} }
+function addListener(scope, type, fn) {
+  (listeners[scope][type] = listeners[scope][type] || []).push(fn)
+}
+function removeListener(scope, type, fn) {
+  const arr = listeners[scope][type] || []
+  const i = arr.indexOf(fn)
+  if (i >= 0) arr.splice(i, 1)
+}
 const documentStub = {
-  hasFocus: () => true,
+  hasFocus: () => focusState.focused,
   visibilityState: 'visible',
   head: { appendChild() {} },
   body: { appendChild() {}, removeChild() {} },
   createElement: () => ({ setAttribute() {}, appendChild() {}, style: {} }),
   querySelector: () => null,
-  addEventListener() {}, removeEventListener() {},
+  addEventListener: (t, fn) => addListener('document', t, fn),
+  removeEventListener: (t, fn) => removeListener('document', t, fn),
 }
 const windowStub = {
   __ModuleLoader__: { load(spec) { captured.factory = spec.factory } },
   setTimeout, clearTimeout, setInterval, clearInterval,
-  addEventListener() {}, removeEventListener() {},
+  addEventListener: (t, fn) => addListener('window', t, fn),
+  removeEventListener: (t, fn) => removeListener('window', t, fn),
+}
+function fire(scope, type) {
+  for (const fn of (listeners[scope][type] || []).slice()) fn()
+}
+// 切换前台/后台：插件是在事件回调里读 document.hasFocus() 的，光改变量不会生效
+function setFocus(value) {
+  focusState.focused = value
+  fire('window', value ? 'focus' : 'blur')
+  fire('document', 'visibilitychange')
 }
 globalThis.window = windowStub
 globalThis.document = documentStub
@@ -50,13 +72,25 @@ globalThis.localStorage = {
   setItem: (k, v) => ls.set(k, String(v)),
   removeItem: (k) => ls.delete(k),
 }
-globalThis.Audio = class { play() { return Promise.resolve() } }
+// 记录页面内放音次数与原生通知请求
+const audioPlays = { count: 0 }
+const nativeCalls = []
+globalThis.Audio = class {
+  play() { audioPlays.count += 1; return Promise.resolve() }
+}
 const eventSources = []
 globalThis.EventSource = class {
   constructor(url) { this.url = url; eventSources.push(this) }
   close() {}
 }
-globalThis.fetch = () => Promise.resolve({ ok: true })
+globalThis.fetch = (url, init) => {
+  if (String(url).includes('/dsh-notify/native')) {
+    let payload = null
+    try { payload = JSON.parse(init && init.body ? init.body : '{}') } catch (e) { payload = null }
+    nativeCalls.push(payload)
+  }
+  return Promise.resolve({ ok: true })
+}
 
 new Function('window', 'document', 'localStorage', 'Audio', 'EventSource', 'fetch', source)(
   windowStub, documentStub, globalThis.localStorage, globalThis.Audio, globalThis.EventSource, globalThis.fetch)
@@ -263,6 +297,51 @@ const face = captured.sectionOpts.inject()
 assert.equal(face.scope, configForm, '设置面板应绑定 configForms 的表单')
 assert(requestedEntries.includes('dsh-notify'), "configForms.get('dsh-notify') 应被调用")
 
+// 8b) 提示音：前台在页面内发声，后台交给系统通知发声（各响一次，不重复）
+//
+// 前台：不应请求原生通知，且页面内应放音一次。
+setFocus(true)
+nativeCalls.length = 0
+audioPlays.count = 0
+listState = Object.assign({}, listState, {
+  ids: listState.ids.concat('sfg'),
+  byId: Object.assign({}, listState.byId, { sfg: { id: 'sfg', displayTitle: 'proj', blank: false, running: true, updatedAt: NOW } }),
+})
+emitList()
+assert.equal(nativeCalls.length, 0, '前台不应请求系统原生通知')
+assert.equal(audioPlays.count, 1, '前台应在页面内放音一次')
+snapshot().slice().forEach((t) => toastStore.remove(t.id))
+
+// 后台：应请求原生通知并带上 sound=true，页面内不应再放音（否则会响两次）。
+setFocus(false)
+nativeCalls.length = 0
+audioPlays.count = 0
+listState = Object.assign({}, listState, {
+  ids: listState.ids.concat('sbg'),
+  byId: Object.assign({}, listState.byId, { sbg: { id: 'sbg', displayTitle: 'proj', blank: false, running: true, updatedAt: NOW } }),
+})
+emitList()
+assert.equal(nativeCalls.length, 1, '后台应请求一次系统原生通知')
+assert.equal(nativeCalls[0].sound, true, '后台的系统通知应带 sound=true')
+assert.equal(audioPlays.count, 0, '后台不应在页面内重复放音')
+snapshot().slice().forEach((t) => toastStore.remove(t.id))
+
+// 后台 + 关掉系统通知通道：只剩页面内发声这一条路，仍应放音。
+setFocus(false)
+nativeCalls.length = 0
+audioPlays.count = 0
+SETTINGS.native = false
+listState = Object.assign({}, listState, {
+  ids: listState.ids.concat('sbg2'),
+  byId: Object.assign({}, listState.byId, { sbg2: { id: 'sbg2', displayTitle: 'proj', blank: false, running: true, updatedAt: NOW } }),
+})
+emitList()
+assert.equal(nativeCalls.length, 0, '系统通知关闭时不应请求原生通知')
+assert.equal(audioPlays.count, 1, '系统通知关闭时后台仍应尝试页面内放音')
+SETTINGS.native = true
+setFocus(true)
+snapshot().slice().forEach((t) => toastStore.remove(t.id))
+
 // 9) 优雅降级：uiSession / jobs / configForms 全缺席也要能加载
 captured.store = null
 mod.apply(makeCtx({
@@ -274,4 +353,4 @@ mod.apply(makeCtx({
 assert(captured.store, '缺少可选服务时插件仍应加载')
 assert(captured.sectionOpts, '设置分区仍应注册')
 
-console.log('OK: 客户端接线全部通过（sessionStatus / jobs 订阅有界 / configForms / 子代理过滤 / 优雅降级）')
+console.log('OK: 客户端接线全部通过（sessionStatus / jobs 订阅有界 / configForms / 子代理过滤 / 前台后台提示音 / 优雅降级）')
