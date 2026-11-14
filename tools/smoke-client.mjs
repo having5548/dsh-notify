@@ -180,6 +180,9 @@ function slotsStub() {
     register(opts, comp) { captured.sectionOpts = opts; captured.sectionComp = comp; return () => {} },
   }
 }
+// 记录「打开会话」的调用（DSH 0.2.x 的导航入口是 uiWorkspace.openSession）
+const openedSessions = []
+const uiWorkspace = { openSession(id) { openedSessions.push(id) } }
 function makeCtx(extra = {}) {
   return Object.assign({
     effect(fn) { const d = fn(); return () => { if (typeof d === 'function') d() } },
@@ -190,6 +193,7 @@ function makeCtx(extra = {}) {
       if (name === 'sessions') return sessions
       if (name === 'slots') return slotsStub()
       if (name === 'uiSession') return uiSession
+      if (name === 'uiWorkspace') return uiWorkspace
       if (name === 'jobs') return jobs
       if (name === 'configForms') return configForms
       if (name === 'locale') return { register() {}, bind: () => (k) => k }
@@ -342,6 +346,27 @@ SETTINGS.native = true
 setFocus(true)
 snapshot().slice().forEach((t) => toastStore.remove(t.id))
 
+// 8c) 「查看」按钮必须真的跳转会话。
+// DSH 0.2.x 的导航入口是 uiWorkspace.openSession(id)；旧的 sessions.open 已不存在，
+// 这正是「点查看没反应」的成因，所以这里锁死这条路径。
+openedSessions.length = 0
+es.onmessage({ data: JSON.stringify({ kind: 'turn-end', sessionId: 's1', title: 'proj', reason: 'completed' }) })
+const viewToast = snapshot().find((t) => (t.actions || []).some((a) => a.label === '查看'))
+assert(viewToast, '任务完成通知应带「查看」按钮')
+const viewAction = viewToast.actions.find((a) => a.label === '查看')
+viewAction.onClick()
+assert.deepEqual(openedSessions, ['s1'], '「查看」应调用 uiWorkspace.openSession(s1)')
+snapshot().slice().forEach((t) => toastStore.remove(t.id))
+
+// 8d) 点通知正文（onOpen）也应跳转
+openedSessions.length = 0
+es.onmessage({ data: JSON.stringify({ kind: 'turn-end', sessionId: 's2', title: 'proj', reason: 'completed' }) })
+const bodyToast = snapshot().find((t) => t.onOpen)
+assert(bodyToast, '通知正文应可点击')
+bodyToast.onOpen()
+assert.deepEqual(openedSessions, ['s2'], '点正文应调用 uiWorkspace.openSession(s2)')
+snapshot().slice().forEach((t) => toastStore.remove(t.id))
+
 // 9) 优雅降级：uiSession / jobs / configForms 全缺席也要能加载
 captured.store = null
 mod.apply(makeCtx({
@@ -353,4 +378,4 @@ mod.apply(makeCtx({
 assert(captured.store, '缺少可选服务时插件仍应加载')
 assert(captured.sectionOpts, '设置分区仍应注册')
 
-console.log('OK: 客户端接线全部通过（sessionStatus / jobs 订阅有界 / configForms / 子代理过滤 / 前台后台提示音 / 优雅降级）')
+console.log('OK: 客户端接线全部通过（sessionStatus / jobs 订阅有界 / configForms / 子代理过滤 / 前台后台提示音 / 查看跳转 / 优雅降级）')

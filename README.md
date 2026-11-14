@@ -4,7 +4,7 @@
 
 **DeepSeek Harness 通用通知插件** — 新会话 / 待审批 / 任务完成 / 任务中断，一个都不错过。
 
-![Version](https://img.shields.io/badge/version-0.6.0-4c7ef3?style=flat-square)
+![Version](https://img.shields.io/badge/version-0.6.1-4c7ef3?style=flat-square)
 ![Platform](https://img.shields.io/badge/platform-Windows%2010%2B%20%7C%20macOS-0078d6?style=flat-square)
 ![License](https://img.shields.io/badge/license-MIT-green?style=flat-square)
 ![Runtime](https://img.shields.io/badge/runtime-DSH%20Web%20GUI-ff6b6b?style=flat-square)
@@ -34,7 +34,7 @@
 pnpm pack --pack-destination ..
 
 # 安装到 DSH profile（新版桌面端是 desktop，旧版 Web 是 web）
-dsh plugin --profile desktop add having5548-dsh-notify-0.6.0.tgz
+dsh plugin --profile desktop add having5548-dsh-notify-0.6.1.tgz
 ```
 
 安装完成后**重启 DSH Web GUI** 生效（重启会中断当前会话，请先保存手头任务）。
@@ -108,6 +108,7 @@ flowchart LR
 - 应用内通知的「批准 / 拒绝」按钮直接调用 `PendingApproval.answer('allowed-once' | 'rejected')`，不需要先打开会话；待办在别处被应答或取消后，对应 Toast 会自动撤掉
 - **子代理会话被静音**：DSH 的子代理各自拥有独立会话（客户端 `SessionSummary.origin`、服务端 `session.header.origin` 均为 `'subagent'`），它们的每一轮都会 `turn/end`——一次 fan-out 工作流能刷出几十条通知。服务端在广播前就拦掉，「新会话」「任务完成」两侧也各自过滤。**审批 / 待回答不过滤**：漏掉一次授权的代价远大于多一条通知
 - 后台任务名册是**按会话订阅**的（`ctx.jobs.watchRows`），每个订阅在服务端是一条常开的 `job.list` 流。插件只订阅「可能还有任务在跑」的会话：当前会话、正在运行的会话、12 小时内活跃过的会话、以及名册里当前仍有任务的会话，其余不订阅
+- 应用内通知的「查看」按钮（以及点通知正文）通过 **`ctx.uiWorkspace.openSession(id)`** 跳转到对应会话。DSH 0.2.x 起 `sessions.open(id)` 已被移除，旧写法会抛错再被吞掉、表现为「点了没反应」——插件对旧版保留了 `sessions.open` 回退
 - 应用内通知的「查看」按钮仅作用于当前页面（纯 JS），不涉及任何系统激活
 - 多页面（浏览器 + 桌面壳）同时打开时按 `tag` 去重，避免重复通知
 
